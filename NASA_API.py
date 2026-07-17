@@ -15,11 +15,11 @@ results = earthaccess.search_data(
 
 earthaccess.download(results, "./Data/2002")
 
-# Loop on summers from 2003 to 2010
+# Loop on Antarctic summers from 2003 to 2010
 for year in range(2003, 2011):
     results = earthaccess.search_data(
         short_name="MODIS_AQUA_L3_SST_THERMAL_MONTHLY_9KM_DAYTIME_V2019.0",
-        temporal=(f"{year}-01", f"{year}-04"),
+        temporal=(f"{year}-01", f"{year}-03"),
     )
     
     earthaccess.download(results, f"./Data/{year}")
