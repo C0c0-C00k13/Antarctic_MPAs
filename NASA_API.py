@@ -4,9 +4,6 @@ import argparse
 import os
 from datetime import datetime, timedelta
 
-
-os.system("conda install -c conda-forge earthaccess -y")
-
 import earthaccess
 
 # ---------------------------
@@ -53,9 +50,8 @@ ARGS = parser.parse_args()
 # Login
 # ---------------------------
 
-os.environ["EARTHDATA_USERNAME"] = ""
-os.environ["EARTHDATA_PASSWORD"] = ""
-
+# os.environ["EARTHDATA_USERNAME"] = ""
+# os.environ["EARTHDATA_PASSWORD"] = ""
 
 earthaccess.login(strategy="environment", persist=True)
 
@@ -187,7 +183,7 @@ while current <= end:
                     all_files.extend(files)
 
             except Exception as e:
-                raise RuntimeError(f"Download failed: {e}")
+                print(f"Download failed: {e}")
 
     # increment month
     current = increment(current, ARGS.resolution)
@@ -199,8 +195,9 @@ while current <= end:
 with open(ARGS.out_file, "w") as f:
     if all_files:
         for file in all_files:
-            f.write(f"{os.path.abspath(file)}\n")
+            f.write(f"{os.path.basename(file)}\n")
     else:
         f.write("No files downloaded\n")
 
-print(f"Resolution: {RESOLUTION} | Files downloaded: {len(all_files)}")
+print(f"Resolution: {RESOLUTION} | Files downloaded: \
+      {len(os.listdir(DOWNLOAD_PATH))}")
