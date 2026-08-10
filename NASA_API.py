@@ -4,6 +4,7 @@ import argparse
 import os
 from datetime import datetime, timedelta
 
+
 os.system("conda install -c conda-forge earthaccess -y")
 
 import earthaccess
@@ -41,6 +42,7 @@ parser.add_argument(
 parser.add_argument(
     "--resolution",
     choices=["daily", "monthly"],
+    required=True,
     help="Increment dates daily or monthly")
 
 parser.add_argument("--out_file", type=str, required=True)
@@ -53,6 +55,7 @@ ARGS = parser.parse_args()
 
 os.environ["EARTHDATA_USERNAME"] = ""
 os.environ["EARTHDATA_PASSWORD"] = ""
+
 
 earthaccess.login(strategy="environment", persist=True)
 
@@ -68,8 +71,8 @@ def increment(current, step):
         The current datetime to increment.
     step : str
         The step type. Supported values:
-        - "month": advances to the first day of the next month
-        - "day": advances by one day
+        - "monthly": advances to the first day of the next month
+        - "daily": advances by one day
 
     Returns
     -------
@@ -83,11 +86,11 @@ def increment(current, step):
       from January 31 to February).
     - For daily increments, a standard timedelta of one day is applied.
     """
-    if step == "month":
+    if step == "monthly":
         year = current.year + (current.month // 12)
         month = (current.month % 12) + 1
         return datetime(year, month, 1)  # ALWAYS safe
-    
+
     return current + timedelta(days=1)
 
 
@@ -151,18 +154,27 @@ os.makedirs(DOWNLOAD_PATH, exist_ok=True)
 all_files = []
 
 # ---------------------------
-# MONTHLY logic
+# Main retrieval loop
 # ---------------------------
 current = start
 
 while current <= end:
-    
+
     date_str = current.strftime(DATE_FORMAT)
     if date_str not in excluded:
 
+        start_period = current
+        end_period = current
+        if RESOLUTION == "monthly":
+            next_month = increment(current, "monthly")
+            end_period = min(next_month - timedelta(days=1), end)
+
         results = earthaccess.search_data(
             short_name=ARGS.short_name,
-            temporal=(date_str, date_str),
+            temporal=(
+                start_period.strftime(DATE_FORMAT),
+                end_period.strftime(DATE_FORMAT)
+            ),
             bounding_box=(
                 ARGS.lon_min, ARGS.lat_min,
                 ARGS.lon_max, ARGS.lat_max)
@@ -175,7 +187,7 @@ while current <= end:
                     all_files.extend(files)
 
             except Exception as e:
-                print(f"Download failed: {e}")
+                raise RuntimeError(f"Download failed: {e}")
 
     # increment month
     current = increment(current, ARGS.resolution)
@@ -191,4 +203,4 @@ with open(ARGS.out_file, "w") as f:
     else:
         f.write("No files downloaded\n")
 
-print(f"Using temporal resolution: {RESOLUTION}")
+print(f"Resolution: {RESOLUTION} | Files downloaded: {len(all_files)}")
