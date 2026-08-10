@@ -2,7 +2,6 @@
 
 import argparse
 import os
-from calendar import monthrange
 from datetime import datetime, timedelta
 
 os.system("conda install -c conda-forge earthaccess -y")
@@ -48,12 +47,13 @@ parser.add_argument("--out_file", type=str, required=True)
 
 ARGS = parser.parse_args()
 
-os.environ["EARTHDATA_USERNAME"] = ""
-os.environ["EARTHDATA_PASSWORD"] = ""
-
 # ---------------------------
 # Login
 # ---------------------------
+
+os.environ["EARTHDATA_USERNAME"] = ""
+os.environ["EARTHDATA_PASSWORD"] = ""
+
 earthaccess.login(strategy="environment", persist=True)
 
 
@@ -87,8 +87,8 @@ def increment(current, step):
         year = current.year + (current.month // 12)
         month = (current.month % 12) + 1
         return datetime(year, month, 1)  # ALWAYS safe
-    else:
-        return current + timedelta(days=1)
+    
+    return current + timedelta(days=1)
 
 
 # ---------------------------
@@ -96,59 +96,50 @@ def increment(current, step):
 # ---------------------------
 RESOLUTION = ARGS.resolution
 
-if RESOLUTION == "monthly":
-    DATE_FORMAT = "%Y-%m"
-    STEP = "month"
-else:
-    DATE_FORMAT = "%Y-%m-%d"
-    STEP = "day"
+DATE_FORMAT = "%Y-%m-%d"
+
+
+def parse_date(value, name):
+    """Validate date format."""
+    try:
+        return datetime.strptime(value, DATE_FORMAT)
+    except ValueError:
+        raise ValueError(
+            f"Invalid {name}: expected YYYY-MM-DD"
+        )
+
+
+# ---------------------------
+# Prepare dates
+# ---------------------------
+start = parse_date(ARGS.start_date, "start_date")
+end = parse_date(ARGS.end_date, "end_date")
+
+if start > end:
+    raise ValueError("start_date must be earlier than or equal to end_date")
 
 excluded = set()
 
+# Single excluded dates
 if ARGS.exclude_dates:
-    for d in ARGS.exclude_dates.split(","):
-        d = d.strip()
-        dt = datetime.strptime(d, DATE_FORMAT)
-        excluded.add(dt.strftime(DATE_FORMAT))
-
-for label, value in [("start_date", ARGS.start_date),
-                     ("end_date", ARGS.end_date)]:
-    try:
-        datetime.strptime(value, DATE_FORMAT)
-    except ValueError:
-        raise ValueError(
-            f"Invalid {label} for {RESOLUTION}: expected {DATE_FORMAT}"
+    for value in ARGS.exclude_dates.split(","):
+        excluded.add(
+            parse_date(value.strip(), "exclude_date")
+            .strftime(DATE_FORMAT)
         )
 
-start = datetime.strptime(ARGS.start_date, DATE_FORMAT)
-end = datetime.strptime(ARGS.end_date, DATE_FORMAT)
-
-if start > end:
-    raise ValueError(
-        "start_date must be earlier than or equal to end_date"
-    )
-
-
-if STEP == "month":
-    start = start.replace(day=1)
-    end = end.replace(day=1)
-
-# ---------------------------
-# Parse excluded ranges
-# format: YYYY-MM-DD:YYYY-MM-DD
-#         YYYY-MM:YYYY-MM
-# ---------------------------
+# Excluded ranges
 if ARGS.exclude_ranges:
     for r in ARGS.exclude_ranges.split(","):
-        if ":" in r:
-            start_r, end_r = r.split(":")
-            start_r = datetime.strptime(start_r.strip(), DATE_FORMAT)
-            end_r = datetime.strptime(end_r.strip(), DATE_FORMAT)
+        begin, finish = r.split(":")
 
-            current = start_r
-            while current <= end_r:
-                excluded.add(current.strftime(DATE_FORMAT))
-                current = increment(current, STEP)
+        current = parse_date(begin.strip(), "range start")
+        stop = parse_date(finish.strip(), "range end")
+
+        while current <= stop:
+            excluded.add(current.strftime(DATE_FORMAT))
+            current = increment(current, ARGS.resolution)
+
 
 # ---------------------------
 # Prepare output path
@@ -162,67 +153,33 @@ all_files = []
 # ---------------------------
 # MONTHLY logic
 # ---------------------------
-if RESOLUTION == "monthly":
-    current = start
+current = start
 
-    while current <= end:
-        month_str = current.strftime("%Y-%m")
+while current <= end:
+    
+    date_str = current.strftime(DATE_FORMAT)
+    if date_str not in excluded:
 
-        if month_str not in excluded:
-            year, mon = current.year, current.month
-            last_day = monthrange(year, mon)[1]
+        results = earthaccess.search_data(
+            short_name=ARGS.short_name,
+            temporal=(date_str, date_str),
+            bounding_box=(
+                ARGS.lon_min, ARGS.lat_min,
+                ARGS.lon_max, ARGS.lat_max)
+        )
 
-            start_date = f"{month_str}-01"
-            end_date = f"{month_str}-{last_day:02d}"
+        if results:
+            try:
+                files = earthaccess.download(results, DOWNLOAD_PATH)
+                if files:
+                    all_files.extend(files)
 
-            results = earthaccess.search_data(
-                short_name=ARGS.short_name,
-                temporal=(start_date, end_date),
-                bounding_box=(
-                    ARGS.lon_min, ARGS.lat_min,
-                    ARGS.lon_max, ARGS.lat_max)
-            )
+            except Exception as e:
+                print(f"Download failed: {e}")
 
-            if results:
-                try:
-                    files = earthaccess.download(results, DOWNLOAD_PATH)
-                    if files:
-                        all_files.extend(files)
+    # increment month
+    current = increment(current, ARGS.resolution)
 
-                except Exception as e:
-                    print(f"Download failed: {e}")
-
-        # increment month
-        current = increment(current, STEP)
-
-# ---------------------------
-# DAILY logic
-# ---------------------------
-else:
-    current = start
-
-    while current <= end:
-        date_str = current.strftime("%Y-%m-%d")
-
-        if date_str not in excluded:
-            results = earthaccess.search_data(
-                short_name=ARGS.short_name,
-                temporal=(date_str, date_str),
-                bounding_box=(
-                    ARGS.lon_min, ARGS.lat_min,
-                    ARGS.lon_max, ARGS.lat_max)
-            )
-
-            if results:
-                try:
-                    files = earthaccess.download(results, DOWNLOAD_PATH)
-                    if files:
-                        all_files.extend(files)
-
-                except Exception as e:
-                    print(f"Download failed: {e}")
-
-        current = increment(current, STEP)
 
 # ---------------------------
 # Output
